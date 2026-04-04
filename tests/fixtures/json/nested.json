@@ -1,0 +1,17 @@
+{
+  "hero": {
+    "title": "Build the future",
+    "subtitle": "Open-source tools for developers",
+    "cta": "Get started"
+  },
+  "features": {
+    "speed": {
+      "title": "Fast",
+      "description": "Transactions confirm in seconds"
+    },
+    "security": {
+      "title": "Secure",
+      "description": "Cryptographic guarantees protect your data"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "welcome": "Welcome to the <strong>developer portal</strong>",
+  "description": "Check the <a href=\"/docs\">documentation</a> for details",
+  "plain": "This has no HTML at all",
+  "mixed": "Use <code>npm install</code> to get started"
+}

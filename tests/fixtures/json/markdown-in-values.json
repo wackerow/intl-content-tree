@@ -1,0 +1,4 @@
+{
+  "intro": "A simple key",
+  "rich-content": "## Overview\n\nThis value contains [a link](/docs) and **bold text**.\n\n- First item\n- Second item"
+}

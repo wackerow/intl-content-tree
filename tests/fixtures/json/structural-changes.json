@@ -1,0 +1,6 @@
+{
+  "kept": "This key stays the same",
+  "modified": "This value will be different in the updated version",
+  "removed-key": "This key will be removed",
+  "renamed-old": "This key will be renamed"
+}
