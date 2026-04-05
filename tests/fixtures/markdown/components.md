@@ -16,4 +16,4 @@ Every public API should implement rate limiting to prevent abuse.
 
 <Button label="Get started" href="/get-started/" />
 
-<YouTube id="dQw4w9WgXcQ" />
+<Demo id="abc1234" />

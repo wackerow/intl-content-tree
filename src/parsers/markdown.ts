@@ -11,11 +11,11 @@ import { createNode, computeHashes } from "../core/tree.js"
 // Hoisted regex patterns (compiled once, not per-line)
 const FENCE_RE = /^(\s*)(```+)(.*)$/
 const HEADING_RE = /^(#{1,6})\s+(.+)$/
-const COMPONENT_RE = /^<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)([\s\S]*?)(\/)?>$/
+// Only matches clean opening/self-closing tags -- not <div>content</div>
+const COMPONENT_RE = /^<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)(\s[^>]*)?(\/)?>\s*$/
 const ATTR_RE = /(\w[\w-]*)=(?:"([^"]*)"|{([^}]*)}|'([^']*)')/g
 const INLINE_RE =
   /(?:`([^`]+)`)|(?:!\[([^\]]*)\]\(([^)]+)\))|(?:\[([^\]]+)\]\(([^)]+)\))|(?:<(\w[\w-]*)\s+([^>]*)\/?>(?:([^<]*)<\/\6>)?)/g
-const HTML_RE = /<[a-zA-Z][\w-]*[\s>]/
 
 /**
  * Parse markdown/MDX content into a TreeNode tree.
@@ -40,7 +40,7 @@ export function parseMarkdown(
     elementType: "root",
   })
 
-  // Parse frontmatter
+  // Parse frontmatter (single-line key: value pairs only; multi-line YAML not supported)
   let lineIndex = 0
   if (lines[0]?.trim() === "---") {
     lineIndex = 1
@@ -73,7 +73,6 @@ export function parseMarkdown(
   let proseBuffer: string[] = []
   let inCodeFence = false
   let codeFenceLang = ""
-  let codeFenceIndent = 0
   let codeFenceBacktickCount = 0
   let codeLines: string[] = []
 
@@ -143,7 +142,6 @@ export function parseMarkdown(
     codeLines = []
     inCodeFence = false
     codeFenceLang = ""
-    codeFenceIndent = 0
     codeFenceBacktickCount = 0
   }
 
@@ -197,15 +195,12 @@ export function parseMarkdown(
       if (!inCodeFence) {
         flushProse()
         inCodeFence = true
-        codeFenceIndent = fenceMatch[1].length
         codeFenceBacktickCount = backtickCount
         codeFenceLang = fenceMatch[3].trim()
         codeLines = []
         lineIndex++
         continue
       } else {
-        // Per CommonMark: closing fence must have >= opening backtick count
-        // and no content after the backticks (trim check)
         if (backtickCount >= codeFenceBacktickCount && !fenceMatch[3].trim()) {
           flushCodeFence()
           lineIndex++
@@ -254,25 +249,24 @@ export function parseMarkdown(
       flushProse()
       const tagName = componentMatch[1]
       const isSelfClosing = line.trimEnd().endsWith("/>")
+      const attrs = parseAttributes(line, cfg)
+      const attrChildren = buildAttributeChildren(attrs)
 
       if (isSelfClosing) {
-        const attrs = parseAttributes(line, cfg)
         currentContainer.children.push(
           createNode({
             id: `component:${currentContainer.children.length}`,
             nodeType: "element",
-            contentType: attrs.hasTranslatable ? "mixed" : "inert",
+            contentType: attrChildren.length > 0 ? "mixed" : "inert",
             elementType: "component",
-            value: line,
-            meta: { tagName, ...attrs.meta },
+            meta: { tagName },
+            children: attrChildren,
           })
         )
       } else {
         // Opening tag: collect until closing tag, parse children
         const componentLines: string[] = []
         const closeTag = `</${tagName}>`
-        // Regex for detecting nested opening tags of the same name
-        // Uses word boundary to avoid <Info> matching <InfoBanner>
         const openTagRe = new RegExp(`<${tagName}[\\s>/]`)
         lineIndex++
         let depth = 1
@@ -288,16 +282,14 @@ export function parseMarkdown(
         }
 
         const innerContent = componentLines.join("\n")
-        const attrs = parseAttributes(line, cfg)
-
         const innerTree = parseMarkdown(innerContent, config, parserConfig)
         const componentNode = createNode({
           id: `component:${currentContainer.children.length}`,
           nodeType: "element",
           contentType: "mixed",
           elementType: "component",
-          meta: { tagName, ...attrs.meta },
-          children: innerTree.children,
+          meta: { tagName },
+          children: [...attrChildren, ...innerTree.children],
         })
         currentContainer.children.push(componentNode)
       }
@@ -357,23 +349,69 @@ function extractComments(
 function parseAttributes(
   line: string,
   cfg: ContentTreeConfig
-): { hasTranslatable: boolean; meta: Record<string, string> } {
-  const meta: Record<string, string> = {}
-  let hasTranslatable = false
-  // Reset lastIndex since ATTR_RE is module-level with /g flag
+): { translatableAttrs: Record<string, string>; inertAttrs: Record<string, string> } {
+  const translatableAttrs: Record<string, string> = {}
+  const inertAttrs: Record<string, string> = {}
   ATTR_RE.lastIndex = 0
   let match
 
   while ((match = ATTR_RE.exec(line)) !== null) {
     const name = match[1]
     const value = match[2] ?? match[3] ?? match[4] ?? ""
-    meta[name] = value
     if (cfg.translatableAttributes.includes(name)) {
-      hasTranslatable = true
+      translatableAttrs[name] = value
+    } else {
+      inertAttrs[name] = value
     }
   }
 
-  return { hasTranslatable, meta }
+  return { translatableAttrs, inertAttrs }
+}
+
+/** Create child nodes for component attributes, split by translatable/inert */
+function buildAttributeChildren(
+  attrs: { translatableAttrs: Record<string, string>; inertAttrs: Record<string, string> }
+): TreeNode[] {
+  const children: TreeNode[] = []
+
+  for (const [name, value] of Object.entries(attrs.translatableAttrs)) {
+    children.push(
+      createNode({
+        id: `attr:${name}`,
+        nodeType: "element",
+        contentType: "translatable",
+        elementType: "component-attribute",
+        value,
+        meta: { name },
+      })
+    )
+  }
+
+  for (const [name, value] of Object.entries(attrs.inertAttrs)) {
+    children.push(
+      createNode({
+        id: `attr:${name}`,
+        nodeType: "element",
+        contentType: "inert",
+        elementType: "component-attribute",
+        value,
+        meta: { name },
+      })
+    )
+  }
+
+  return children
+}
+
+/** Parse attributes from an inline HTML tag's attribute string */
+function parseInlineAttrs(attrString: string): Record<string, string> {
+  const meta: Record<string, string> = {}
+  ATTR_RE.lastIndex = 0
+  let match
+  while ((match = ATTR_RE.exec(attrString)) !== null) {
+    meta[match[1]] = match[2] ?? match[3] ?? match[4] ?? ""
+  }
+  return meta
 }
 
 function parseInlineElements(
@@ -398,7 +436,6 @@ function parseInlineElements(
   const remaining = text
   let idx = 0
 
-  // Reset lastIndex since INLINE_RE is module-level with /g flag
   INLINE_RE.lastIndex = 0
 
   let lastEnd = 0
@@ -421,6 +458,7 @@ function parseInlineElements(
     }
 
     if (inlineMatch[1] !== undefined) {
+      // Inline code
       elements.push(
         createNode({
           id: `inline-code:${idx++}`,
@@ -431,6 +469,7 @@ function parseInlineElements(
         })
       )
     } else if (inlineMatch[2] !== undefined || inlineMatch[3] !== undefined) {
+      // Image
       elements.push(
         createNode({
           id: `image:${idx++}`,
@@ -442,6 +481,7 @@ function parseInlineElements(
         })
       )
     } else if (inlineMatch[4] !== undefined) {
+      // Link
       elements.push(
         createNode({
           id: `link:${idx++}`,
@@ -453,6 +493,8 @@ function parseInlineElements(
         })
       )
     } else if (inlineMatch[6] !== undefined) {
+      // HTML tag -- parse attributes into meta
+      const tagAttrs = parseInlineAttrs(inlineMatch[7] || "")
       elements.push(
         createNode({
           id: `html-tag:${idx++}`,
@@ -460,7 +502,7 @@ function parseInlineElements(
           contentType: inlineMatch[8] ? "mixed" : "inert",
           elementType: "html-tag",
           value: inlineMatch[8] || undefined,
-          meta: { tagName: inlineMatch[6] },
+          meta: { tagName: inlineMatch[6], ...tagAttrs },
         })
       )
     }
