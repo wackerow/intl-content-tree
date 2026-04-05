@@ -124,9 +124,10 @@ export interface SerializedNode {
   anchorHash: string
   /** Hash of group label (only present on group/section nodes) */
   labelHash?: string
-  children: Record<string, SerializedNode>
-  /** Ordered list of child IDs (object keys have no guaranteed order) */
-  childrenOrder: string[]
+  /** Child nodes keyed by ID (omitted when no children) */
+  children?: Record<string, SerializedNode>
+  /** Ordered list of child IDs (omitted when 0-1 children; object key order is not guaranteed) */
+  childrenOrder?: string[]
 }
 
 // ---------- Diff ----------

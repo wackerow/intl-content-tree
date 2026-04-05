@@ -142,23 +142,24 @@ export function serialize(
   if (!tree.contentHash) computeHashes(tree)
 
   function serializeNode(node: TreeNode): SerializedNode {
-    const children: Record<string, SerializedNode> = {}
-    const childrenOrder: string[] = []
-
-    for (const child of node.children) {
-      children[child.id] = serializeNode(child)
-      childrenOrder.push(child.id)
-    }
-
     const serialized: SerializedNode = {
       contentHash: node.contentHash,
       anchorHash: node.anchorHash,
-      children,
-      childrenOrder,
     }
 
     if (node.labelHash !== undefined) {
       serialized.labelHash = node.labelHash
+    }
+
+    if (node.children.length > 0) {
+      serialized.children = {}
+      for (const child of node.children) {
+        serialized.children[child.id] = serializeNode(child)
+      }
+      // Only include childrenOrder when 2+ children (order is ambiguous)
+      if (node.children.length > 1) {
+        serialized.childrenOrder = node.children.map((c) => c.id)
+      }
     }
 
     return serialized
@@ -180,8 +181,11 @@ export function deserialize(manifest: TreeManifest): TreeNode {
     node: SerializedNode,
     depth: number = 0
   ): TreeNode {
-    const children = node.childrenOrder.map((childId) =>
-      deserializeNode(childId, node.children[childId], depth + 1)
+    const childMap = node.children ?? {}
+    // Use childrenOrder if present; otherwise fall back to object keys (safe for 0-1 children)
+    const childOrder = node.childrenOrder ?? Object.keys(childMap)
+    const children = childOrder.map((childId) =>
+      deserializeNode(childId, childMap[childId], depth + 1)
     )
 
     const hasChildren = children.length > 0
