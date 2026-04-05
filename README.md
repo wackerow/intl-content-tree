@@ -86,6 +86,7 @@ const tree = parseMarkdown(content, {
 | URLs and paths | inert | `https://example.com` |
 | Code bodies | inert | `const x = 1` |
 | Component attributes | per config | `title=` translatable, `href=` inert |
+| ICU variables | inert | `{username}`, `{count, plural, ...}` |
 
 ### JSON
 
@@ -102,7 +103,7 @@ const tree = parseJson(content, {
 })
 ```
 
-String values containing HTML or markdown are detected automatically and classified as mixed content.
+String values containing HTML, markdown, or ICU MessageFormat variables (`{name}`, `{count, plural, ...}`) are detected and decomposed automatically. URLs and variable names are classified as inert; prose between them is translatable.
 
 ## Diff Engine
 
