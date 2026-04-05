@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG, DEFAULT_MARKDOWN_CONFIG } from "../core/types.js"
 import { AUTO_SLUG_PREFIX, LABEL_NODE_ID } from "../core/constants.js"
 import { normalizeForHash } from "../core/hash.js"
 import { createNode, computeHashes } from "../core/tree.js"
+import { decomposeInline } from "./inline.js"
 
 // Hoisted regex patterns (compiled once, not per-line)
 const FENCE_RE = /^(\s*)(```+)(.*)$/
@@ -14,8 +15,6 @@ const HEADING_RE = /^(#{1,6})\s+(.+)$/
 // Only matches clean opening/self-closing tags -- not <div>content</div>
 const COMPONENT_RE = /^<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)(\s[^>]*)?(\/)?>\s*$/
 const ATTR_RE = /(\w[\w-]*)=(?:"([^"]*)"|{([^}]*)}|'([^']*)')/g
-const INLINE_RE =
-  /(?:`([^`]+)`)|(?:!\[([^\]]*)\]\(([^)]+)\))|(?:\[([^\]]+)\]\(([^)]+)\))|(?:<(\w[\w-]*)\s+([^>]*)\/?>(?:([^<]*)<\/\6>)?)/g
 
 /**
  * Parse markdown/MDX content into a TreeNode tree.
@@ -403,22 +402,10 @@ function buildAttributeChildren(
   return children
 }
 
-/** Parse attributes from an inline HTML tag's attribute string */
-function parseInlineAttrs(attrString: string): Record<string, string> {
-  const meta: Record<string, string> = {}
-  ATTR_RE.lastIndex = 0
-  let match
-  while ((match = ATTR_RE.exec(attrString)) !== null) {
-    meta[match[1]] = match[2] ?? match[3] ?? match[4] ?? ""
-  }
-  return meta
-}
-
 function parseInlineElements(
   text: string,
   cfg: ContentTreeConfig
 ): TreeNode[] {
-  // For group-level depth, just return a single prose node
   if (cfg.depth === "group") {
     return [
       createNode({
@@ -431,99 +418,5 @@ function parseInlineElements(
     ]
   }
 
-  // Element-level: split on links, inline code, images, HTML tags
-  const elements: TreeNode[] = []
-  const remaining = text
-  let idx = 0
-
-  INLINE_RE.lastIndex = 0
-
-  let lastEnd = 0
-  let inlineMatch
-
-  while ((inlineMatch = INLINE_RE.exec(remaining)) !== null) {
-    if (inlineMatch.index > lastEnd) {
-      const prose = remaining.slice(lastEnd, inlineMatch.index).trim()
-      if (prose) {
-        elements.push(
-          createNode({
-            id: `prose:${idx++}`,
-            nodeType: "element",
-            contentType: "translatable",
-            elementType: "prose",
-            value: normalizeForHash(prose),
-          })
-        )
-      }
-    }
-
-    if (inlineMatch[1] !== undefined) {
-      // Inline code
-      elements.push(
-        createNode({
-          id: `inline-code:${idx++}`,
-          nodeType: "element",
-          contentType: "inert",
-          elementType: "inline-code",
-          value: inlineMatch[1],
-        })
-      )
-    } else if (inlineMatch[2] !== undefined || inlineMatch[3] !== undefined) {
-      // Image
-      elements.push(
-        createNode({
-          id: `image:${idx++}`,
-          nodeType: "element",
-          contentType: inlineMatch[2] ? "mixed" : "inert",
-          elementType: "image",
-          value: inlineMatch[2] || undefined,
-          meta: { src: inlineMatch[3] },
-        })
-      )
-    } else if (inlineMatch[4] !== undefined) {
-      // Link
-      elements.push(
-        createNode({
-          id: `link:${idx++}`,
-          nodeType: "element",
-          contentType: "mixed",
-          elementType: "link",
-          value: inlineMatch[4],
-          meta: { href: inlineMatch[5] },
-        })
-      )
-    } else if (inlineMatch[6] !== undefined) {
-      // HTML tag -- parse attributes into meta
-      const tagAttrs = parseInlineAttrs(inlineMatch[7] || "")
-      elements.push(
-        createNode({
-          id: `html-tag:${idx++}`,
-          nodeType: "element",
-          contentType: inlineMatch[8] ? "mixed" : "inert",
-          elementType: "html-tag",
-          value: inlineMatch[8] || undefined,
-          meta: { tagName: inlineMatch[6], ...tagAttrs },
-        })
-      )
-    }
-
-    lastEnd = inlineMatch.index + inlineMatch[0].length
-  }
-
-  if (lastEnd < remaining.length) {
-    const prose = remaining.slice(lastEnd).trim()
-    if (prose) {
-      elements.push(
-        createNode({
-          id: `prose:${idx++}`,
-          nodeType: "element",
-          contentType: "translatable",
-          elementType: "prose",
-          value: normalizeForHash(prose),
-        })
-      )
-    }
-  }
-
-  return elements
+  return decomposeInline(text)
 }

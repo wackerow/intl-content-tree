@@ -48,3 +48,4 @@ export { diff } from "./core/diff.js"
 // Parsers
 export { parseMarkdown } from "./parsers/markdown.js"
 export { parseJson } from "./parsers/json.js"
+export { decomposeInline, needsDecomposition } from "./parsers/inline.js"

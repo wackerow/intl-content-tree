@@ -4,9 +4,9 @@ import type {
   JsonParserConfig,
 } from "../core/types.js"
 import { DEFAULT_CONFIG, DEFAULT_JSON_CONFIG } from "../core/types.js"
-import { normalizeForHash } from "../core/hash.js"
 import { createNode, computeHashes } from "../core/tree.js"
 import { parseMarkdown } from "./markdown.js"
+import { decomposeInline, needsDecomposition } from "./inline.js"
 
 /**
  * Parse a JSON string into a TreeNode tree.
@@ -73,16 +73,16 @@ function parseObject(
             children: mdTree.children,
           })
         )
-      } else if (containsHtml(value)) {
-        // HTML in value -- mixed content
+      } else if (needsDecomposition(value)) {
+        // HTML or ICU variables in value -- decompose into children
+        const children = decomposeInline(value)
         nodes.push(
           createNode({
             id: key,
             nodeType: "element",
             contentType: "mixed",
             elementType: "json-value",
-            value: normalizeForHash(value),
-            meta: { containsHtml: "true" },
+            children,
           })
         )
       } else {
@@ -147,8 +147,4 @@ function parseObject(
   }
 
   return nodes
-}
-
-function containsHtml(value: string): boolean {
-  return /<[a-zA-Z][\w-]*[\s>]/.test(value)
 }

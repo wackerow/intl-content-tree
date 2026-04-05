@@ -69,10 +69,16 @@ describe("parseJson", () => {
   describe("html-in-values.json", () => {
     const tree = parseJson(readFixture("html-in-values.json"))
 
-    it("detects HTML in string values", () => {
+    it("decomposes HTML in string values into children", () => {
       const welcome = tree.children.find((c) => c.id === "welcome")!
       expect(welcome.contentType).toBe("mixed")
-      expect(welcome.meta?.containsHtml).toBe("true")
+      expect(welcome.children.length).toBeGreaterThan(0)
+      // description has <a href="...">, which should decompose into a link-like html-tag
+      const desc = tree.children.find((c) => c.id === "description")!
+      expect(desc.contentType).toBe("mixed")
+      const htmlTag = desc.children.find((c) => c.elementType === "html-tag")
+      expect(htmlTag).toBeDefined()
+      expect(htmlTag!.meta?.href).toBe("/docs")
     })
 
     it("classifies plain values as translatable", () => {

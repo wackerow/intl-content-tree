@@ -68,6 +68,7 @@ export type ElementType =
   | "component"
   | "component-attribute"
   | "html-tag"
+  | "icu-variable"
   | "frontmatter-field"
   | "json-value"
   | "root"
