@@ -89,8 +89,14 @@ export function computeHashes(node: TreeNode): TreeNode {
       node.contentHash = EMPTY_HASH
       node.anchorHash = hash(val)
     } else {
+      // Mixed: value is translatable, meta holds inert attributes (href, src, etc.)
       node.contentHash = hash(val)
-      node.anchorHash = hash(val)
+      if (node.meta && Object.keys(node.meta).length > 0) {
+        const metaValues = Object.keys(node.meta).sort().map((k) => node.meta![k]).join("\0")
+        node.anchorHash = hash(metaValues)
+      } else {
+        node.anchorHash = hash(val)
+      }
     }
   }
 

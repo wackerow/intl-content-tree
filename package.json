@@ -1,6 +1,6 @@
 {
   "name": "intl-content-tree",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Parse structured content (markdown, JSON) into hashable trees for incremental localization",
   "license": "MPL-2.0",
   "type": "module",

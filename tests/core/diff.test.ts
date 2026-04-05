@@ -234,4 +234,155 @@ describe("diff", () => {
     expect(result.unchanged).toHaveLength(1)
     expect(result.unchanged[0].labelHashChanged).toBe(false)
   })
+
+  // -- Meta hashing tests (links, images, etc.) --
+
+  it("link URL change in meta -> inertDrift", () => {
+    function makeLinkTree(href: string) {
+      return computeHashes(
+        createNode({
+          id: "root",
+          nodeType: "root",
+          contentType: "mixed",
+          elementType: "root",
+          children: [
+            createNode({
+              id: "section",
+              nodeType: "section",
+              contentType: "mixed",
+              elementType: "section",
+              children: [
+                createNode({
+                  id: "link:0",
+                  nodeType: "element",
+                  contentType: "mixed",
+                  elementType: "link",
+                  value: "Click here",
+                  meta: { href },
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    }
+    const old = makeLinkTree("/glossary/#erc-20")
+    const updated = makeLinkTree("https://example.com")
+    const result = diff(old, updated)
+    expect(result.inertDrift).toHaveLength(1)
+    expect(result.inertDrift[0].id).toBe("section")
+    expect(result.inertDrift[0].anchorHashChanged).toBe(true)
+    expect(result.inertDrift[0].contentHashChanged).toBe(false)
+  })
+
+  it("image src change in meta -> inertDrift", () => {
+    function makeImageTree(src: string) {
+      return computeHashes(
+        createNode({
+          id: "root",
+          nodeType: "root",
+          contentType: "mixed",
+          elementType: "root",
+          children: [
+            createNode({
+              id: "section",
+              nodeType: "section",
+              contentType: "mixed",
+              elementType: "section",
+              children: [
+                createNode({
+                  id: "image:0",
+                  nodeType: "element",
+                  contentType: "mixed",
+                  elementType: "image",
+                  value: "Alt text",
+                  meta: { src },
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    }
+    const old = makeImageTree("/images/old.png")
+    const updated = makeImageTree("/images/new.png")
+    const result = diff(old, updated)
+    expect(result.inertDrift).toHaveLength(1)
+    expect(result.inertDrift[0].anchorHashChanged).toBe(true)
+    expect(result.inertDrift[0].contentHashChanged).toBe(false)
+  })
+
+  it("link display text change -> translatableDrift", () => {
+    function makeLinkTree(text: string) {
+      return computeHashes(
+        createNode({
+          id: "root",
+          nodeType: "root",
+          contentType: "mixed",
+          elementType: "root",
+          children: [
+            createNode({
+              id: "section",
+              nodeType: "section",
+              contentType: "mixed",
+              elementType: "section",
+              children: [
+                createNode({
+                  id: "link:0",
+                  nodeType: "element",
+                  contentType: "mixed",
+                  elementType: "link",
+                  value: text,
+                  meta: { href: "/same-url" },
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    }
+    const old = makeLinkTree("Old text")
+    const updated = makeLinkTree("New text")
+    const result = diff(old, updated)
+    expect(result.translatableDrift).toHaveLength(1)
+    expect(result.translatableDrift[0].contentHashChanged).toBe(true)
+    expect(result.translatableDrift[0].anchorHashChanged).toBe(false)
+  })
+
+  it("link text + URL both change -> translatableDrift", () => {
+    function makeLinkTree(text: string, href: string) {
+      return computeHashes(
+        createNode({
+          id: "root",
+          nodeType: "root",
+          contentType: "mixed",
+          elementType: "root",
+          children: [
+            createNode({
+              id: "section",
+              nodeType: "section",
+              contentType: "mixed",
+              elementType: "section",
+              children: [
+                createNode({
+                  id: "link:0",
+                  nodeType: "element",
+                  contentType: "mixed",
+                  elementType: "link",
+                  value: text,
+                  meta: { href },
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    }
+    const old = makeLinkTree("Old text", "/old-url")
+    const updated = makeLinkTree("New text", "/new-url")
+    const result = diff(old, updated)
+    expect(result.translatableDrift).toHaveLength(1)
+    expect(result.translatableDrift[0].contentHashChanged).toBe(true)
+    expect(result.translatableDrift[0].anchorHashChanged).toBe(true)
+  })
 })
