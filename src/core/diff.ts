@@ -1,5 +1,5 @@
-import type { TreeNode, DiffResult, DiffEntry } from "./types.js"
-import { computeHashes } from "./tree.js"
+import type { TreeNode, DiffResult, DiffEntry, InertChange } from "./types.js"
+import { computeHashes, getNodeByPath } from "./tree.js"
 
 interface IndexedNode {
   node: TreeNode
@@ -160,5 +160,136 @@ function diffLevel(
     if (oldHasSections && newHasSections && (contentChanged || anchorChanged)) {
       diffLevel(oldN, newN, newEntry.path, result)
     }
+  }
+}
+
+/**
+ * Extract detailed inert changes from a diff result.
+ *
+ * For each inertDrift entry, walks into both trees to find which specific
+ * leaf nodes had their anchorHash change, and returns the old/new values
+ * with context (element type, attribute name, tag name).
+ */
+export function extractInertChanges(
+  oldTree: TreeNode,
+  newTree: TreeNode,
+  diffResult: DiffResult
+): InertChange[] {
+  const changes: InertChange[] = []
+
+  for (const entry of diffResult.inertDrift) {
+    const oldNode = getNodeByPath(oldTree, entry.path)
+    const newNode = getNodeByPath(newTree, entry.path)
+    if (!oldNode || !newNode) continue
+
+    // Leaf node at root level (e.g., frontmatter fields)
+    if (oldNode.children.length === 0 && newNode.children.length === 0) {
+      if (oldNode.anchorHash !== newNode.anchorHash) {
+        extractNodeChanges(oldNode, newNode, entry.path, changes)
+      }
+    } else {
+      collectChangedLeaves(oldNode, newNode, entry.path, changes)
+    }
+  }
+
+  return changes
+}
+
+/** Recursively find leaf nodes whose anchorHash changed */
+function collectChangedLeaves(
+  oldNode: TreeNode,
+  newNode: TreeNode,
+  basePath: string,
+  changes: InertChange[],
+  parentTagName?: string
+): void {
+  const oldChildMap = new Map<string, TreeNode>()
+  for (const child of oldNode.children) {
+    oldChildMap.set(child.id, child)
+  }
+
+  // Inherit tagName from this node if it's a component
+  const tagName = parentTagName ?? oldNode.meta?.tagName
+
+  for (const newChild of newNode.children) {
+    const oldChild = oldChildMap.get(newChild.id)
+    if (!oldChild) continue
+
+    const childPath = basePath ? `${basePath}/${newChild.id}` : newChild.id
+
+    if (oldChild.anchorHash === newChild.anchorHash) continue
+
+    if (newChild.children.length > 0 && oldChild.children.length > 0) {
+      collectChangedLeaves(oldChild, newChild, childPath, changes, tagName)
+    } else {
+      extractNodeChanges(oldChild, newChild, childPath, changes, tagName)
+    }
+  }
+}
+
+/**
+ * Extract one InertChange per changed meta key (or value) from a leaf node.
+ * For nodes with meta (links, images, html-tags), emits one change per
+ * differing meta key. For plain inert nodes, emits one change for the value.
+ */
+function extractNodeChanges(
+  oldChild: TreeNode,
+  newChild: TreeNode,
+  childPath: string,
+  changes: InertChange[],
+  parentTagName?: string
+): void {
+  const tagName = parentTagName ?? oldChild.meta?.tagName ?? newChild.meta?.tagName
+
+  // For mixed nodes with meta, compare each meta key individually
+  if (oldChild.meta && newChild.meta) {
+    const allKeys = new Set([
+      ...Object.keys(oldChild.meta),
+      ...Object.keys(newChild.meta),
+    ])
+
+    let emittedMetaChange = false
+    for (const metaKey of allKeys) {
+      // Skip non-value metadata
+      if (metaKey === "tagName" || metaKey === "language") continue
+      // For ICU/component-attribute nodes, "name" is descriptive metadata, not a value to diff
+      if (metaKey === "name" && (oldChild.elementType === "icu-variable" || oldChild.elementType === "component-attribute")) continue
+
+      const oldVal = oldChild.meta[metaKey]
+      const newVal = newChild.meta[metaKey]
+      if (oldVal === newVal) continue
+
+      changes.push({
+        path: childPath,
+        elementType: newChild.elementType,
+        oldValue: oldVal ?? "",
+        newValue: newVal ?? "",
+        key: metaKey,
+        tagName,
+      })
+      emittedMetaChange = true
+    }
+
+    // If no meta keys differed, the value itself changed
+    if (!emittedMetaChange && (oldChild.value ?? "") !== (newChild.value ?? "")) {
+      changes.push({
+        path: childPath,
+        elementType: newChild.elementType,
+        oldValue: oldChild.value ?? "",
+        newValue: newChild.value ?? "",
+        key: oldChild.meta.key ?? oldChild.meta.name,
+        tagName,
+      })
+    }
+  } else {
+    // No meta -- plain inert node (inline-code, code-body, etc.)
+    changes.push({
+      path: childPath,
+      elementType: newChild.elementType,
+      oldValue: oldChild.value ?? "",
+      newValue: newChild.value ?? "",
+      key: oldChild.meta?.key ?? oldChild.meta?.name,
+      tagName,
+    })
   }
 }
