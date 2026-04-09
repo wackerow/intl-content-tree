@@ -33,6 +33,7 @@ export function diff(oldTree: TreeNode, newTree: TreeNode): DiffResult {
     unchanged: [],
     inertDrift: [],
     translatableDrift: [],
+    structuralDrift: [],
     added: [],
     removed: [],
     renamed: [],
@@ -144,11 +145,16 @@ function diffLevel(
           newIndex: newEntry.index,
         })
       } else {
-        // Body unchanged -- label may or may not have changed
         result.unchanged.push(entry)
       }
     } else if (contentChanged) {
-      result.translatableDrift.push(entry)
+      // Content hash changed -- but did actual translatable text change,
+      // or just the structure (inert nodes added/removed)?
+      if (hasTranslatableChanges(oldN, newN)) {
+        result.translatableDrift.push(entry)
+      } else {
+        result.structuralDrift.push(entry)
+      }
     } else {
       // Only anchor changed
       result.inertDrift.push(entry)
@@ -161,6 +167,85 @@ function diffLevel(
       diffLevel(oldN, newN, newEntry.path, result)
     }
   }
+}
+
+/**
+ * Check whether any translatable content actually changed between two nodes.
+ * Collects contentHash values from all translatable leaf descendants, sorts
+ * them, and compares. If the sorted sets differ, translatable content changed.
+ */
+function hasTranslatableChanges(
+  oldNode: TreeNode,
+  newNode: TreeNode
+): boolean {
+  // Leaf nodes: if the node has translatable content, any content change is translatable
+  if (oldNode.children.length === 0 && newNode.children.length === 0) {
+    return (
+      oldNode.contentType === "translatable" ||
+      newNode.contentType === "translatable" ||
+      oldNode.contentType === "mixed" ||
+      newNode.contentType === "mixed"
+    )
+  }
+
+  const oldHashes = collectTranslatableHashes(oldNode)
+  const newHashes = collectTranslatableHashes(newNode)
+
+  if (oldHashes.length !== newHashes.length) return true
+
+  oldHashes.sort()
+  newHashes.sort()
+
+  for (let i = 0; i < oldHashes.length; i++) {
+    if (oldHashes[i] !== newHashes[i]) return true
+  }
+
+  return false
+}
+
+/** Collect contentHash from all translatable leaf descendants (excludes _label) */
+function collectTranslatableHashes(node: TreeNode): string[] {
+  const hashes: string[] = []
+
+  for (const child of node.children) {
+    // Skip _label -- heading text is tracked via labelHash, not contentHash
+    if (child.id === "_label") continue
+
+    if (child.children.length > 0) {
+      hashes.push(...collectTranslatableHashes(child))
+    } else if (
+      child.contentType === "translatable" ||
+      (child.contentType === "mixed" && child.value)
+    ) {
+      hashes.push(child.contentHash)
+    }
+  }
+
+  return hashes
+}
+
+/**
+ * Map a tree node path to the nearest ancestor section's ID.
+ * Useful for mapping fine-grained diff paths (e.g., "my-section/component:2/link:0")
+ * to the heading {#id} anchor that the pipeline uses for retranslation.
+ */
+export function getContainingSection(
+  root: TreeNode,
+  path: string
+): string | undefined {
+  const parts = path.split("/")
+  let current: TreeNode | undefined = root
+  let lastSectionId: string | undefined
+
+  for (const part of parts) {
+    if (!current) return lastSectionId
+    current = current.children.find((c) => c.id === part)
+    if (current?.nodeType === "section") {
+      lastSectionId = current.id
+    }
+  }
+
+  return lastSectionId
 }
 
 /**

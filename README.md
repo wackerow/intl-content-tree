@@ -113,6 +113,7 @@ Compares two trees and classifies every change:
 |---------------|---------|--------|
 | `unchanged` | No changes | Nothing (check `labelHashChanged` for heading-only edits) |
 | `inertDrift` | Only URLs, code, or paths changed | Copy from source -- no translation needed |
+| `structuralDrift` | Nodes added/removed but no prose text changed | Propagate structure -- no translation needed |
 | `translatableDrift` | Prose or translatable content changed | Retranslate this section |
 | `added` | New group not in old tree | Translate from scratch |
 | `removed` | Group no longer in source | Remove from translations |

@@ -141,6 +141,8 @@ export interface DiffResult {
   inertDrift: DiffEntry[]
   /** Groups where translatable content changed (translation needed) */
   translatableDrift: DiffEntry[]
+  /** Groups where structure changed (nodes added/removed) but no translatable text changed */
+  structuralDrift: DiffEntry[]
   /** New groups not in the old tree */
   added: DiffEntry[]
   /** Groups in old tree but not in new */

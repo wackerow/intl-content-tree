@@ -44,7 +44,7 @@ export {
 } from "./core/tree.js"
 
 // Diff engine
-export { diff, extractInertChanges } from "./core/diff.js"
+export { diff, extractInertChanges, getContainingSection } from "./core/diff.js"
 
 // Parsers
 export { parseMarkdown } from "./parsers/markdown.js"
