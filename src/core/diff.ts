@@ -177,16 +177,19 @@ function diffLevel(
 /**
  * Check whether any translatable content actually changed between two nodes.
  *
+ * Compares sorted multisets of contentHashes from translatable leaves.
  * Uses the NEW tree's contentType for classification (deserialized old trees
  * have contentType: "mixed" on all nodes, which is unreliable).
- * Uses EMPTY_HASH to detect removed translatable nodes from the old tree
- * (inert nodes have contentHash === EMPTY_HASH, translatable nodes don't).
+ * Matches by hash, not path -- so section renames don't trigger false positives.
+ *
+ * For the old tree (may be deserialized), collects all leaf contentHashes
+ * that are NOT EMPTY_HASH (inert leaves have EMPTY_HASH).
  */
 function hasTranslatableChanges(
   oldNode: TreeNode,
   newNode: TreeNode
 ): boolean {
-  // Leaf nodes: use new tree's contentType (old tree may be deserialized with "mixed")
+  // Leaf nodes: use new tree's contentType
   if (oldNode.children.length === 0 && newNode.children.length === 0) {
     return (
       newNode.contentType === "translatable" ||
@@ -194,82 +197,50 @@ function hasTranslatableChanges(
     )
   }
 
-  // Build ID-keyed hash maps for both trees
-  const oldHashMap = new Map<string, string>()
-  collectHashesById(oldNode, oldHashMap)
-  const newHashMap = new Map<string, string>()
-  collectHashesById(newNode, newHashMap)
+  // New tree: collect hashes from translatable leaves (contentType is reliable)
+  const newHashes: string[] = []
+  collectTranslatableHashes(newNode, newHashes)
 
-  // Check new tree's translatable leaves: any new or changed?
-  for (const child of flattenLeaves(newNode)) {
-    if (
-      child.contentType === "translatable" ||
-      (child.contentType === "mixed" && child.value)
-    ) {
-      const oldHash = oldHashMap.get(child.path)
-      if (oldHash === undefined || oldHash !== child.contentHash) return true
-    }
+  // Old tree: collect hashes from all non-EMPTY leaf nodes
+  // (contentType is unreliable from deserialization, but EMPTY_HASH
+  // reliably identifies inert leaves since their contentHash = hash(""))
+  const oldHashes: string[] = []
+  collectNonEmptyLeafHashes(oldNode, oldHashes)
+
+  // Sort and compare as multisets
+  newHashes.sort()
+  oldHashes.sort()
+
+  if (newHashes.length !== oldHashes.length) return true
+  for (let i = 0; i < newHashes.length; i++) {
+    if (newHashes[i] !== oldHashes[i]) return true
   }
-
-  // Check removed nodes: if a LEAF node with non-EMPTY contentHash was removed,
-  // translatable content was deleted. Branch nodes (components, sections) being
-  // removed is structural, not translatable.
-  const oldLeaves = new Map<string, string>()
-  collectLeafHashesById(oldNode, oldLeaves)
-  for (const [key, oldHash] of oldLeaves) {
-    if (!newHashMap.has(key) && oldHash !== EMPTY_HASH) return true
-  }
-
   return false
 }
 
-/** Flatten leaf nodes with their paths */
-function flattenLeaves(
-  node: TreeNode,
-  prefix: string = ""
-): Array<TreeNode & { path: string }> {
-  const leaves: Array<TreeNode & { path: string }> = []
+/** Collect contentHashes from translatable leaves using contentType (new tree) */
+function collectTranslatableHashes(node: TreeNode, hashes: string[]): void {
   for (const child of node.children) {
     if (child.id === "_label") continue
-    const path = prefix ? `${prefix}/${child.id}` : child.id
     if (child.children.length > 0) {
-      leaves.push(...flattenLeaves(child, path))
-    } else {
-      leaves.push({ ...child, path })
-    }
-  }
-  return leaves
-}
-
-/** Recursively collect contentHash for LEAF nodes only, by path */
-function collectLeafHashesById(
-  node: TreeNode,
-  map: Map<string, string>,
-  prefix: string = ""
-): void {
-  for (const child of node.children) {
-    if (child.id === "_label") continue
-    const key = prefix ? `${prefix}/${child.id}` : child.id
-    if (child.children.length > 0) {
-      collectLeafHashesById(child, map, key)
-    } else {
-      map.set(key, child.contentHash)
+      collectTranslatableHashes(child, hashes)
+    } else if (
+      child.contentType === "translatable" ||
+      (child.contentType === "mixed" && child.value)
+    ) {
+      hashes.push(child.contentHash)
     }
   }
 }
 
-/** Recursively collect contentHash by path from a tree */
-function collectHashesById(
-  node: TreeNode,
-  map: Map<string, string>,
-  prefix: string = ""
-): void {
+/** Collect contentHashes from leaf nodes that aren't EMPTY_HASH (old tree) */
+function collectNonEmptyLeafHashes(node: TreeNode, hashes: string[]): void {
   for (const child of node.children) {
     if (child.id === "_label") continue
-    const key = prefix ? `${prefix}/${child.id}` : child.id
-    map.set(key, child.contentHash)
     if (child.children.length > 0) {
-      collectHashesById(child, map, key)
+      collectNonEmptyLeafHashes(child, hashes)
+    } else if (child.contentHash !== EMPTY_HASH) {
+      hashes.push(child.contentHash)
     }
   }
 }

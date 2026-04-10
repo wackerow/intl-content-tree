@@ -436,6 +436,46 @@ describe("structuralDrift classification", () => {
     expect(result.translatableDrift[0].id).toBe("s")
     expect(result.structuralDrift).toHaveLength(0)
   })
+
+  it("heading ID rename does not trigger translatableDrift on parent", () => {
+    // Subsection renamed {#old-name} -> {#new-name}, content identical
+    const beforeMd = [
+      "## Parent {#parent}",
+      "",
+      "### Old Name {#old-name}",
+      "",
+      "Content stays the same.",
+      "",
+      "## Next {#next}",
+      "",
+      "Other.",
+    ].join("\n")
+    const afterMd = [
+      "## Parent {#parent}",
+      "",
+      "### New Name {#new-name}",
+      "",
+      "Content stays the same.",
+      "",
+      "## Next {#next}",
+      "",
+      "Other.",
+    ].join("\n")
+
+    const beforeTree = parseMarkdown(beforeMd, ELEMENT_CFG)
+    const manifest = serialize(beforeTree, "test.md")
+    const oldTree = deserialize(manifest)
+    computeHashes(oldTree)
+
+    const newTree = parseMarkdown(afterMd, ELEMENT_CFG)
+    const result = diff(oldTree, newTree)
+
+    // Subsection renamed but content identical -> parent is unchanged
+    // (heading ID is excluded from contentHash, child prose is the same)
+    expect(result.translatableDrift).toHaveLength(0)
+    expect(result.structuralDrift).toHaveLength(0)
+    expect(result.unchanged.some((e) => e.id === "parent")).toBe(true)
+  })
 })
 
 describe("getContainingSection", () => {
