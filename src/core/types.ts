@@ -170,22 +170,6 @@ export interface DiffEntry {
   labelHashChanged: boolean
 }
 
-/** A single inert value change extracted from a diff */
-export interface InertChange {
-  /** Node path (e.g., "my-section/link:0") */
-  path: string
-  /** What kind of element changed */
-  elementType: ElementType
-  /** The old value */
-  oldValue: string
-  /** The new value */
-  newValue: string
-  /** Attribute name (for component-attribute, frontmatter-field, html-tag) */
-  key?: string
-  /** Component tag name (for component-attribute) */
-  tagName?: string
-}
-
 // ---------- Validation ----------
 
 /** Result of validating a tree's readiness for incremental tracking */

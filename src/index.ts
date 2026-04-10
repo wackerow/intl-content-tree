@@ -10,7 +10,6 @@ export type {
   DiffEntry,
   ContentType,
   ElementType,
-  InertChange,
   ValidationResult,
 } from "./core/types.js"
 
@@ -44,7 +43,7 @@ export {
 } from "./core/tree.js"
 
 // Diff engine
-export { diff, extractInertChanges, getContainingSection } from "./core/diff.js"
+export { diff, getContainingSection } from "./core/diff.js"
 
 // Parsers
 export { parseMarkdown } from "./parsers/markdown.js"
