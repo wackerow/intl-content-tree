@@ -22,8 +22,9 @@ Source file  -->  [parse]  -->  Tree  -->  [serialize]  -->  Manifest
                                             |
 New source   -->  [parse]  -->  Tree  -->  [diff]  -->  Changeset
                                                          |
-                                          unchanged | inertDrift | translatableDrift
-                                          added | removed | renamed | reordered
+                                          unchanged | inertDrift | structuralDrift
+                                          translatableDrift | added | removed
+                                          renamed | reordered
 ```
 
 ## Quick Start
