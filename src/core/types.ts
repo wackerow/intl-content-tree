@@ -170,6 +170,53 @@ export interface DiffEntry {
   labelHashChanged: boolean
 }
 
+// ---------- Change extraction ----------
+
+/** Result of walking two trees to extract per-node changes */
+export interface ChangeSet {
+  /** Individual node changes (update, add, remove) */
+  changes: NodeChange[]
+  /** Content that moved between sections (same hash, different path) */
+  relocations: NodeRelocation[]
+  /** Heading ID changes detected by overlapping child hashes */
+  sectionRenames: SectionRename[]
+}
+
+/** A single node-level change between two trees */
+export interface NodeChange {
+  action: "update" | "add" | "remove"
+  /** Path in the new tree (for update/add) or old tree (for remove) */
+  path: string
+  elementType: ElementType
+  contentType: ContentType
+  oldValue?: string
+  newValue?: string
+  /** Meta key (for attribute changes, frontmatter fields) */
+  key?: string
+  /** Component tag name */
+  tagName?: string
+}
+
+/** Content relocated between sections (same hash fingerprint, different path) */
+export interface NodeRelocation {
+  oldPath: string
+  newPath: string
+  /** Translatable content hash */
+  contentHash: string
+  /** Inert content hash */
+  anchorHash: string
+}
+
+/** A heading section whose ID changed */
+export interface SectionRename {
+  oldId: string
+  newId: string
+  /** Parent path for disambiguation in nested trees */
+  parentPath: string
+  /** Whether the heading label text also changed */
+  labelHashChanged: boolean
+}
+
 // ---------- Validation ----------
 
 /** Result of validating a tree's readiness for incremental tracking */

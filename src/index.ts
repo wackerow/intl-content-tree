@@ -11,6 +11,10 @@ export type {
   ContentType,
   ElementType,
   ValidationResult,
+  ChangeSet,
+  NodeChange,
+  NodeRelocation,
+  SectionRename,
 } from "./core/types.js"
 
 export {
@@ -44,6 +48,9 @@ export {
 
 // Diff engine
 export { diff, getContainingSection } from "./core/diff.js"
+
+// Change extraction (Merkle tree walk)
+export { extractChanges } from "./core/extract.js"
 
 // Parsers
 export { parseMarkdown } from "./parsers/markdown.js"
