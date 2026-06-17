@@ -12,8 +12,11 @@ import { decomposeInline } from "./inline.js"
 // Hoisted regex patterns (compiled once, not per-line)
 const FENCE_RE = /^(\s*)(```+)(.*)$/
 const HEADING_RE = /^(#{1,6})\s+(.+)$/
-// Only matches clean opening/self-closing tags -- not <div>content</div>
-const COMPONENT_RE = /^<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)(\s[^>]*)?(\/)?>\s*$/
+// Only matches clean opening/self-closing tags -- not <div>content</div>.
+// Allows leading indentation so block components nested inside a container
+// (e.g. `  <Card .../>` inside `<Grid>`) are still detected; the trailing
+// `>\s*$` keeps the "tag alone on its line" guard intact.
+const COMPONENT_RE = /^\s*<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)(\s[^>]*)?(\/)?>\s*$/
 const ATTR_RE = /(\w[\w-]*)=(?:"([^"]*)"|{([^}]*)}|'([^']*)')/g
 
 /**

@@ -165,6 +165,44 @@ describe("parseMarkdown", () => {
     })
   })
 
+  describe("indented components inside a container (Grid > Card)", () => {
+    const md = [
+      "## Benefits {#benefits}",
+      "",
+      "<Grid>",
+      '  <Card title="Fractional Ownership" emoji="🏠" description="Own a slice of an asset." />',
+      '  <Card title="Global market" description="Reach investors worldwide." />',
+      "</Grid>",
+      "",
+    ].join("\n")
+    const tree = parseMarkdown(md, {
+      translatableAttributes: ["title", "description"],
+    })
+
+    it("parses the indented child as a component, not prose", () => {
+      const cards = [...walk(tree)].filter(
+        (n) => n.elementType === "component" && n.meta?.tagName === "Card"
+      )
+      expect(cards.length).toBe(2)
+    })
+
+    it("extracts translatable attributes of indented child components", () => {
+      const attrs = [...walk(tree)].filter(
+        (n) => n.elementType === "component-attribute" && n.meta?.name
+      )
+      const byName = (name: string) =>
+        attrs.filter((n) => n.meta?.name === name).map((n) => n.value)
+      expect(byName("title")).toEqual([
+        "Fractional Ownership",
+        "Global market",
+      ])
+      expect(byName("description")).toEqual([
+        "Own a slice of an asset.",
+        "Reach investors worldwide.",
+      ])
+    })
+  })
+
   describe("empty-sections.md", () => {
     const tree = parseMarkdown(readFixture("empty-sections.md"))
 
