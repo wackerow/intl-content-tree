@@ -315,3 +315,87 @@ describe("parseMarkdown", () => {
     })
   })
 })
+
+describe("multi-line JSX opening tags", () => {
+  const cfg = {
+    translatableAttributes: ["title", "contentPreview", "description", "alt"],
+  }
+  const attrLeaves = (tree: ReturnType<typeof parseMarkdown>) => {
+    const out: Array<{ name: string; value: string }> = []
+    for (const n of walk(tree)) {
+      if (
+        n.elementType === "component-attribute" &&
+        n.contentType === "translatable" &&
+        n.meta?.name
+      ) {
+        out.push({ name: n.meta.name as string, value: n.value as string })
+      }
+    }
+    return out
+  }
+
+  it("extracts attributes from a multi-line opening tag", () => {
+    const md = [
+      "<ExpandableCard",
+      'title="Staking node operators"',
+      'contentPreview="If you are a staker, read this."',
+      'id="staking">',
+      "",
+      "Inner body content here.",
+      "</ExpandableCard>",
+    ].join("\n")
+    const tree = parseMarkdown(md, cfg)
+    const leaves = attrLeaves(tree)
+    expect(leaves).toContainEqual({
+      name: "title",
+      value: "Staking node operators",
+    })
+    expect(leaves).toContainEqual({
+      name: "contentPreview",
+      value: "If you are a staker, read this.",
+    })
+    const prose = [...walk(tree)]
+      .filter((n) => n.elementType === "prose")
+      .map((n) => n.value)
+      .join(" ")
+    expect(prose).toContain("Inner body content")
+  })
+
+  it("handles multi-line self-closing tags", () => {
+    const md = ["<Card", 'title="Hello there"', "/>"].join("\n")
+    expect(attrLeaves(parseMarkdown(md, cfg))).toContainEqual({
+      name: "title",
+      value: "Hello there",
+    })
+  })
+
+  it("does not end the tag on a `>` inside an attribute value", () => {
+    const md = ["<Card", 'title="a > b and c > d"', 'id="x">', "body", "</Card>"].join(
+      "\n"
+    )
+    expect(attrLeaves(parseMarkdown(md, cfg))).toContainEqual({
+      name: "title",
+      value: "a > b and c > d",
+    })
+  })
+
+  it("does not end the tag on a `>` inside a JSX expression", () => {
+    const md = [
+      "<Card",
+      "style={{ comparator: 1 > 0 }}",
+      'title="Styled card">',
+      "body",
+      "</Card>",
+    ].join("\n")
+    expect(attrLeaves(parseMarkdown(md, cfg))).toContainEqual({
+      name: "title",
+      value: "Styled card",
+    })
+  })
+
+  it("still parses single-line components (no regression)", () => {
+    expect(attrLeaves(parseMarkdown('<Card title="One liner" />', cfg))).toContainEqual(
+      { name: "title", value: "One liner" }
+    )
+  })
+})

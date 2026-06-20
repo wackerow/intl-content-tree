@@ -17,6 +17,12 @@ const HEADING_RE = /^(#{1,6})\s+(.+)$/
 // (e.g. `  <Card .../>` inside `<Grid>`) are still detected; the trailing
 // `>\s*$` keeps the "tag alone on its line" guard intact.
 const COMPONENT_RE = /^\s*<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)(\s[^>]*)?(\/)?>\s*$/
+// Start of a (possibly multi-line) JSX opening tag: `<Component` followed by
+// whitespace or end-of-line, with no closing `>` yet on the line. The closing
+// `>` is found by a quote/brace-aware scan (see matchMultilineOpenTag) so that
+// `>` inside attribute values (title="a > b") or JSX expressions ({{ a > b }})
+// does not terminate the tag early.
+const OPEN_TAG_START_RE = /^\s*<([A-Z][A-Za-z0-9]*|[a-z][\w-]*)(\s|$)/
 const ATTR_RE = /(\w[\w-]*)=(?:"([^"]*)"|{([^}]*)}|'([^']*)')/g
 
 /**
@@ -299,6 +305,74 @@ export function parseMarkdown(
       continue
     }
 
+    // Multi-line JSX opening tag (attribute values span multiple lines):
+    //   <ExpandableCard
+    //   title="..."
+    //   contentPreview="...">
+    // COMPONENT_RE above only matches when the closing `>` is on the same line,
+    // so without this these would fall through to prose and their translatable
+    // attributes would never be extracted.
+    const multiOpen = matchMultilineOpenTag(lines, lineIndex)
+    if (multiOpen) {
+      flushProse()
+      const { tagName, openTag, isSelfClosing, closeLineIndex, remainder } =
+        multiOpen
+      const attrs = parseAttributes(openTag, cfg)
+      const attrChildren = buildAttributeChildren(attrs)
+
+      if (isSelfClosing) {
+        currentContainer.children.push(
+          createNode({
+            id: `component:${currentContainer.children.length}`,
+            nodeType: "element",
+            contentType: attrChildren.length > 0 ? "mixed" : "inert",
+            elementType: "component",
+            meta: { tagName },
+            children: attrChildren,
+          })
+        )
+        lineIndex = closeLineIndex + 1
+        if (remainder.trim()) proseBuffer.push(remainder)
+        continue
+      }
+
+      // Opening tag: collect inner content until the matching closing tag,
+      // seeded with any inline content after `>` on the closing line.
+      const componentLines: string[] = []
+      if (remainder.trim()) componentLines.push(remainder)
+      const closeTag = `</${tagName}>`
+      const openTagRe = new RegExp(`<${tagName}[\\s>/]`)
+      let i = closeLineIndex + 1
+      let depth = 1
+      while (i < lines.length) {
+        const cline = lines[i]
+        if (openTagRe.test(cline)) depth++
+        if (cline.includes(closeTag)) {
+          depth--
+          if (depth === 0) break
+        }
+        componentLines.push(cline)
+        i++
+      }
+      const innerTree = parseMarkdown(
+        componentLines.join("\n"),
+        config,
+        parserConfig
+      )
+      currentContainer.children.push(
+        createNode({
+          id: `component:${currentContainer.children.length}`,
+          nodeType: "element",
+          contentType: "mixed",
+          elementType: "component",
+          meta: { tagName },
+          children: [...attrChildren, ...innerTree.children],
+        })
+      )
+      lineIndex = i + 1
+      continue
+    }
+
     // Regular prose line
     proseBuffer.push(line)
     lineIndex++
@@ -346,6 +420,59 @@ function extractComments(
   }
 
   return comments
+}
+
+/**
+ * Detect a JSX opening tag whose attributes span multiple lines, starting at
+ * lines[start]. Returns null when lines[start] is not such a tag — including
+ * the single-line case (closing `>` on the start line), which the COMPONENT_RE
+ * fast path handles. The closing `>` is found by a quote- and brace-aware scan
+ * so a `>` inside an attribute value (title="a > b") or a JSX expression
+ * ({{ a > b }}) does not terminate the tag early.
+ */
+function matchMultilineOpenTag(
+  lines: string[],
+  start: number
+): {
+  tagName: string
+  openTag: string
+  isSelfClosing: boolean
+  closeLineIndex: number
+  remainder: string
+} | null {
+  const m = lines[start].match(OPEN_TAG_START_RE)
+  if (!m) return null
+  const tagName = m[1]
+
+  let quote: string | null = null
+  let brace = 0
+  for (let li = start; li < lines.length; li++) {
+    const line = lines[li]
+    for (let ci = 0; ci < line.length; ci++) {
+      const ch = line[ci]
+      if (quote) {
+        if (ch === quote) quote = null
+        continue
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch
+      } else if (ch === "{") {
+        brace++
+      } else if (ch === "}") {
+        if (brace > 0) brace--
+      } else if (ch === ">" && brace === 0) {
+        if (li === start) return null // single-line: let COMPONENT_RE handle it
+        const openTag = [
+          ...lines.slice(start, li),
+          line.slice(0, ci + 1),
+        ].join("\n")
+        const isSelfClosing = line.slice(0, ci).trimEnd().endsWith("/")
+        const remainder = line.slice(ci + 1)
+        return { tagName, openTag, isSelfClosing, closeLineIndex: li, remainder }
+      }
+    }
+  }
+  return null // no closing `>` found — treat as prose
 }
 
 function parseAttributes(
