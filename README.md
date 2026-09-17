@@ -83,11 +83,38 @@ const tree = parseMarkdown(content, {
 | Link display text | translatable | `[click here](...)` |
 | Image alt text | translatable | `![diagram of the flow](...)` |
 | Code comments | translatable | `// Initialize the connection` |
-| Frontmatter fields | per config | `title:` translatable, `lang:` inert |
+| Frontmatter fields | per config | `title:` translatable, `lang:` inert (see below) |
 | URLs and paths | inert | `https://example.com` |
 | Code bodies | inert | `const x = 1` |
 | Component attributes | per config | `title=` translatable, `href=` inert |
 | ICU variables | inert | `{username}`, `{count, plural, ...}` |
+
+**Frontmatter**
+
+The block between the leading `---` fences is parsed as YAML. Each top-level key becomes a root-level node:
+
+| YAML | Node shape |
+|------|-----------|
+| Scalar (`title: Foo`, `published: 2023-01-01`, `abstract: >-`) | one element node, `frontmatter:<key>` |
+| Sequence (block or flow) | a section node `frontmatter:<key>` with one child per item, IDs `0`, `1`, ... |
+| Mapping | a section node `frontmatter:<key>` with one child per subkey |
+
+```yaml
+---
+title: "Agents: a field guide"   # quotes and trailing comments are not content
+summaryPoints:                   # translatable per config -> items translatable
+  - Agents hold their own keys
+  - Agents pay for their own compute
+tags: ["solidity", "vyper"]      # flow and block spellings hash identically
+author:
+  name: Ada Lovelace             # classified by its own subkey
+  title: Protocol researcher
+---
+```
+
+Sequence items inherit the field's translatability; mapping values are classified by their own subkey. Because items are real child nodes, adding, removing, rewriting, or reordering one moves the field hash and the root hash. Scalar values are kept as written -- quotes stripped, block scalars folded, dates, numbers, and booleans never re-serialized (`1.10` stays `1.10`).
+
+If the block is not valid YAML, parsing falls back to a single-line `key: value` scan and the root node carries `meta.frontmatterParseError = "true"`.
 
 ### JSON
 
@@ -161,6 +188,8 @@ const result = validate(tree)
 // }
 ```
 
+Frontmatter sequences and mappings are section-shaped nodes, but they are schema, not authored groups, so they are excluded from these counts (and from `getContainingSection`).
+
 ### Stable Identifiers
 
 The effectiveness of incremental tracking depends on stable, explicit identifiers for content groups.
@@ -218,7 +247,7 @@ import { serialize, deserialize } from "intl-content-tree"
 
 const manifest = serialize(tree, "docs/getting-started.md")
 // {
-//   version: 1,
+//   version: 2,
 //   sourceFile: "docs/getting-started.md",
 //   generatedAt: "2026-04-04T...",
 //   rootHash: "a1b2c3d4e5f6",
@@ -229,6 +258,10 @@ const restored = deserialize(manifest)
 ```
 
 Manifests use `childrenOrder` arrays to preserve sequence (object key order is not guaranteed in JSON).
+
+### Manifest version 2
+
+`MANIFEST_VERSION` is `2` as of v0.4.0: frontmatter sequences and mappings are now trees of item nodes instead of a single opaque line, so their hashes moved. Stored v1 manifests must be re-derived from the source they were generated against -- comparing a v1 manifest against a v2 tree reports drift on every file whose frontmatter has a sequence, a mapping, a multi-line scalar, a quoted scalar, or a trailing comment. Files whose frontmatter is only plain single-line scalars keep their v1 hashes.
 
 ## What This Package Does NOT Do
 
