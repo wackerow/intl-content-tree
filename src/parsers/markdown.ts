@@ -1,3 +1,4 @@
+import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml"
 import type {
   TreeNode,
   ContentTreeConfig,
@@ -48,31 +49,21 @@ export function parseMarkdown(
     elementType: "root",
   })
 
-  // Parse frontmatter (single-line key: value pairs only; multi-line YAML not supported)
+  // Parse frontmatter as YAML (scalars, sequences, mappings, block scalars)
   let lineIndex = 0
   if (lines[0]?.trim() === "---") {
-    lineIndex = 1
-    while (lineIndex < lines.length && lines[lineIndex].trim() !== "---") {
-      const line = lines[lineIndex]
-      const colonIdx = line.indexOf(":")
-      if (colonIdx > 0) {
-        const key = line.slice(0, colonIdx).trim()
-        const value = line.slice(colonIdx + 1).trim()
-        const isTranslatable = cfg.translatableAttributes.includes(key)
-        root.children.push(
-          createNode({
-            id: `frontmatter:${key}`,
-            nodeType: "element",
-            contentType: isTranslatable ? "translatable" : "inert",
-            elementType: "frontmatter-field",
-            value: value,
-            meta: { key },
-          })
-        )
-      }
-      lineIndex++
-    }
-    if (lineIndex < lines.length) lineIndex++ // skip closing ---
+    let end = 1
+    while (end < lines.length && lines[end].trim() !== "---") end++
+    // Re-join with LF only: a CRLF file would otherwise leave a stray `\r` on
+    // the block's last scalar, which YAML keeps but the author never wrote
+    const block = lines
+      .slice(1, end)
+      .map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l))
+      .join("\n")
+    const { nodes, parseError } = parseFrontmatter(block, cfg)
+    root.children.push(...nodes)
+    if (parseError) root.meta = { ...root.meta, frontmatterParseError: "true" }
+    lineIndex = end < lines.length ? end + 1 : end // skip closing ---
   }
 
   // Track section hierarchy: stack of [level, node]
@@ -383,6 +374,161 @@ export function parseMarkdown(
   flushProse()
 
   return computeHashes(root)
+}
+
+// ---------- Frontmatter ----------
+
+/**
+ * Parse a frontmatter block (the text between the `---` fences) into root-level
+ * nodes.
+ *
+ * Scalars become element nodes; sequences and mappings become section nodes
+ * with one child per item/subkey, mirroring how the JSON parser shapes arrays
+ * and objects. That shape is what makes item edits, additions, removals, and
+ * reorders roll up into the parent hash.
+ *
+ * When the block is not valid YAML the parse falls back to the legacy
+ * single-line `key: value` scan so a malformed block still yields the fields it
+ * can, and `parseError` is reported so callers can surface it.
+ */
+function parseFrontmatter(
+  block: string,
+  cfg: ContentTreeConfig
+): { nodes: TreeNode[]; parseError: boolean } {
+  if (!block.trim()) return { nodes: [], parseError: false }
+
+  let contents: unknown
+  try {
+    const doc = parseDocument(block)
+    if (doc.errors.length > 0) {
+      return { nodes: parseFrontmatterLines(block, cfg), parseError: true }
+    }
+    contents = doc.contents
+  } catch {
+    return { nodes: parseFrontmatterLines(block, cfg), parseError: true }
+  }
+
+  // A block of only comments parses to null contents -- no fields, no error
+  if (contents === null || contents === undefined) {
+    return { nodes: [], parseError: false }
+  }
+  // Valid YAML, but not a mapping (a bare scalar or sequence): no fields to
+  // derive, so fall back and flag it
+  if (!isMap(contents)) {
+    return { nodes: parseFrontmatterLines(block, cfg), parseError: true }
+  }
+
+  const nodes: TreeNode[] = []
+  for (const pair of contents.items) {
+    const key = scalarKey(pair.key)
+    if (!key) continue
+    nodes.push(buildFrontmatterNode(`frontmatter:${key}`, key, pair.value, cfg))
+  }
+  return { nodes, parseError: false }
+}
+
+/**
+ * Build a node for one frontmatter value.
+ *
+ * `key` is the field name that governs translatability: sequence items inherit
+ * the sequence's key, mapping values take their own subkey.
+ */
+function buildFrontmatterNode(
+  id: string,
+  key: string,
+  value: unknown,
+  cfg: ContentTreeConfig
+): TreeNode {
+  if (isSeq(value)) {
+    return createNode({
+      id,
+      nodeType: "section",
+      contentType: "mixed",
+      elementType: "frontmatter-field",
+      meta: { key },
+      children: value.items.map((item, i) =>
+        buildFrontmatterNode(`${i}`, key, item, cfg)
+      ),
+    })
+  }
+
+  if (isMap(value)) {
+    const children: TreeNode[] = []
+    for (const pair of value.items) {
+      const subKey = scalarKey(pair.key)
+      if (!subKey) continue
+      children.push(buildFrontmatterNode(subKey, subKey, pair.value, cfg))
+    }
+    return createNode({
+      id,
+      nodeType: "section",
+      contentType: "mixed",
+      elementType: "frontmatter-field",
+      meta: { key },
+      children,
+    })
+  }
+
+  return createNode({
+    id,
+    nodeType: "element",
+    contentType: cfg.translatableAttributes.includes(key)
+      ? "translatable"
+      : "inert",
+    elementType: "frontmatter-field",
+    value: scalarText(value),
+    meta: { key },
+  })
+}
+
+/**
+ * The scalar as the author wrote it.
+ *
+ * Strings use the resolved value (quotes stripped, escapes and block folding
+ * applied); everything else uses the original source text so dates, numbers,
+ * and booleans are never re-serialized (`1.10` stays `1.10`, not `1.1`).
+ */
+function scalarText(value: unknown): string {
+  if (isScalar(value)) {
+    if (typeof value.value === "string") return value.value
+    if (value.value === null || value.value === undefined) return ""
+    return value.source ?? String(value.value)
+  }
+  if (isAlias(value)) return `*${value.source}`
+  return ""
+}
+
+/** A mapping key as a string, or undefined when it is not a usable key */
+function scalarKey(value: unknown): string | undefined {
+  if (!isScalar(value)) return undefined
+  const text = scalarText(value)
+  return text || undefined
+}
+
+/** Legacy single-line `key: value` scan, kept as the invalid-YAML fallback */
+function parseFrontmatterLines(
+  block: string,
+  cfg: ContentTreeConfig
+): TreeNode[] {
+  const nodes: TreeNode[] = []
+  for (const line of block.split("\n")) {
+    const colonIdx = line.indexOf(":")
+    if (colonIdx <= 0) continue
+    const key = line.slice(0, colonIdx).trim()
+    nodes.push(
+      createNode({
+        id: `frontmatter:${key}`,
+        nodeType: "element",
+        contentType: cfg.translatableAttributes.includes(key)
+          ? "translatable"
+          : "inert",
+        elementType: "frontmatter-field",
+        value: line.slice(colonIdx + 1).trim(),
+        meta: { key },
+      })
+    )
+  }
+  return nodes
 }
 
 // ---------- Helpers ----------

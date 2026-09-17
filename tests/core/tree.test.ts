@@ -11,6 +11,7 @@ import {
   validate,
 } from "../../src/core/tree.js"
 import { hash } from "../../src/core/hash.js"
+import { MANIFEST_VERSION } from "../../src/core/constants.js"
 
 function makeSimpleTree() {
   return createNode({
@@ -184,7 +185,7 @@ describe("serialize / deserialize", () => {
   it("manifest has correct metadata", () => {
     const tree = computeHashes(makeSimpleTree())
     const manifest = serialize(tree, "test.md")
-    expect(manifest.version).toBe(1)
+    expect(manifest.version).toBe(MANIFEST_VERSION)
     expect(manifest.sourceFile).toBe("test.md")
     expect(manifest.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     expect(manifest.rootHash).toHaveLength(12)
@@ -380,6 +381,45 @@ describe("validate", () => {
     expect(result.stableIds).toBe(1)
     expect(result.autoSlugs).toBe(1)
     expect(result.coverage).toBe(50)
+  })
+
+  it("ignores frontmatter sequence/mapping sections", () => {
+    const tree = computeHashes(
+      createNode({
+        id: "root",
+        nodeType: "root",
+        contentType: "mixed",
+        elementType: "root",
+        children: [
+          createNode({
+            id: "frontmatter:tags",
+            nodeType: "section",
+            contentType: "mixed",
+            elementType: "frontmatter-field",
+            meta: { key: "tags" },
+            children: [
+              createNode({
+                id: "0",
+                nodeType: "element",
+                contentType: "inert",
+                elementType: "frontmatter-field",
+                value: "solidity",
+              }),
+            ],
+          }),
+          createNode({
+            id: "stable-id",
+            nodeType: "section",
+            contentType: "mixed",
+            elementType: "section",
+          }),
+        ],
+      })
+    )
+    const result = validate(tree)
+    expect(result.totalSections).toBe(1)
+    expect(result.stableIds).toBe(1)
+    expect(result.coverage).toBe(100)
   })
 
   it("detects duplicate IDs", () => {

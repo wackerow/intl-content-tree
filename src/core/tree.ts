@@ -234,7 +234,12 @@ export function validate(tree: TreeNode): ValidationResult {
   const idCounts = new Map<string, number>()
 
   for (const node of walk(tree)) {
-    if (node.nodeType === "section") {
+    // Frontmatter sequences/mappings are section-shaped but are not content
+    // groups -- their IDs come from the schema, not from authored anchors
+    if (
+      node.nodeType === "section" &&
+      node.elementType !== "frontmatter-field"
+    ) {
       totalSections++
       const count = (idCounts.get(node.id) ?? 0) + 1
       idCounts.set(node.id, count)

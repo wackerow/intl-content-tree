@@ -261,7 +261,12 @@ export function getContainingSection(
   for (const part of parts) {
     if (!current) return lastSectionId
     current = current.children.find((c) => c.id === part)
-    if (current?.nodeType === "section") {
+    // Frontmatter sequences/mappings are section-shaped but are not content
+    // groups, so they never answer "which section contains this path?"
+    if (
+      current?.nodeType === "section" &&
+      current.elementType !== "frontmatter-field"
+    ) {
       lastSectionId = current.id
     }
   }

@@ -106,6 +106,110 @@ describe("extractChanges", () => {
     expect(titleChange!.newValue).toBe("New Title")
   })
 
+  // --- Frontmatter sequences and mappings ---
+
+  const FM_CFG = {
+    depth: "element" as const,
+    translatableAttributes: ["title", "description", "summaryPoints"],
+  }
+  const fm = (block: string) =>
+    parseMarkdown(`---\n${block}\n---\n\n## S {#s}\n\nContent.`, FM_CFG)
+
+  it("detects a translatable sequence item update", () => {
+    const result = extractChanges(
+      fm('summaryPoints:\n  - "Point A"\n  - "Point B"'),
+      fm('summaryPoints:\n  - "Point A"\n  - "Point B rewritten"')
+    )
+    expect(result.changes).toHaveLength(1)
+    expect(result.changes[0]).toMatchObject({
+      action: "update",
+      path: "frontmatter:summaryPoints/1",
+      elementType: "frontmatter-field",
+      contentType: "translatable",
+      oldValue: "Point B",
+      newValue: "Point B rewritten",
+      key: "summaryPoints",
+    })
+  })
+
+  it("detects an inert sequence item update", () => {
+    const result = extractChanges(
+      fm('topic:\n  - "defi"\n  - "staking"'),
+      fm('topic:\n  - "defi"\n  - "solo staking"')
+    )
+    expect(result.changes).toHaveLength(1)
+    expect(result.changes[0]).toMatchObject({
+      action: "update",
+      path: "frontmatter:topic/1",
+      contentType: "inert",
+      oldValue: "staking",
+      newValue: "solo staking",
+      key: "topic",
+    })
+  })
+
+  it("detects an added sequence item", () => {
+    const result = extractChanges(
+      fm('summaryPoints:\n  - "Point A"'),
+      fm('summaryPoints:\n  - "Point A"\n  - "Point B"')
+    )
+    expect(result.changes).toHaveLength(1)
+    expect(result.changes[0]).toMatchObject({
+      action: "add",
+      path: "frontmatter:summaryPoints/1",
+      contentType: "translatable",
+      newValue: "Point B",
+    })
+  })
+
+  it("detects removed sequence items", () => {
+    const result = extractChanges(
+      fm('topic:\n  - "defi"\n  - "nft"\n  - "dao"\n  - "zk"'),
+      fm('topic:\n  - "defi"')
+    )
+    expect(result.changes.map((c) => [c.action, c.path, c.oldValue])).toEqual([
+      ["remove", "frontmatter:topic/1", "nft"],
+      ["remove", "frontmatter:topic/2", "dao"],
+      ["remove", "frontmatter:topic/3", "zk"],
+    ])
+  })
+
+  it("reports a reorder as per-position updates", () => {
+    const result = extractChanges(
+      fm('summaryPoints:\n  - "Point A"\n  - "Point B"'),
+      fm('summaryPoints:\n  - "Point B"\n  - "Point A"')
+    )
+    expect(result.changes.map((c) => [c.path, c.oldValue, c.newValue])).toEqual([
+      ["frontmatter:summaryPoints/0", "Point A", "Point B"],
+      ["frontmatter:summaryPoints/1", "Point B", "Point A"],
+    ])
+  })
+
+  it("detects a mapping subkey update", () => {
+    const result = extractChanges(
+      fm("author:\n  title: Researcher\n  name: Ada"),
+      fm("author:\n  title: Protocol researcher\n  name: Ada")
+    )
+    expect(result.changes).toHaveLength(1)
+    expect(result.changes[0]).toMatchObject({
+      action: "update",
+      path: "frontmatter:author/title",
+      contentType: "translatable",
+      oldValue: "Researcher",
+      newValue: "Protocol researcher",
+      key: "title",
+    })
+  })
+
+  it("reports no changes for a flow -> block reformat", () => {
+    const result = extractChanges(
+      fm('tags: ["solidity", "vyper"]'),
+      fm("tags:\n  - solidity\n  - vyper")
+    )
+    expect(result.changes).toHaveLength(0)
+    expect(result.relocations).toHaveLength(0)
+  })
+
   // --- Add/remove changes ---
 
   it("detects added code fence", () => {

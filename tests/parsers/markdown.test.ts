@@ -288,6 +288,194 @@ describe("parseMarkdown", () => {
     })
   })
 
+  describe("frontmatter.md", () => {
+    const FM_CFG = {
+      depth: "element" as const,
+      translatableAttributes: [
+        "title",
+        "description",
+        "summaryPoints",
+        "abstract",
+        "transcript",
+      ],
+    }
+    const tree = parseMarkdown(readFixture("frontmatter.md"), FM_CFG)
+    const field = (key: string) =>
+      tree.children.find((c) => c.id === `frontmatter:${key}`)!
+
+    it("strips quotes from scalars and keeps the colon in the text", () => {
+      expect(field("title").nodeType).toBe("element")
+      expect(field("title").contentType).toBe("translatable")
+      expect(field("title").value).toBe("Agents: a field guide")
+    })
+
+    it("keeps unquoted scalars verbatim", () => {
+      expect(field("description").value).toBe(
+        "A tour of autonomous agents on public networks"
+      )
+    })
+
+    it("does not re-serialize dates, booleans, or numbers", () => {
+      expect(field("published").value).toBe("2023-01-01")
+      expect(field("published").contentType).toBe("inert")
+      expect(field("featured").value).toBe("true")
+      expect(field("readingTime").value).toBe("12")
+    })
+
+    it("builds a section node with one child per block sequence item", () => {
+      const points = field("summaryPoints")
+      expect(points.nodeType).toBe("section")
+      expect(points.contentType).toBe("mixed")
+      expect(points.elementType).toBe("frontmatter-field")
+      expect(points.meta).toEqual({ key: "summaryPoints" })
+      expect(points.children.map((c) => c.id)).toEqual(["0", "1"])
+      expect(points.children.map((c) => c.value)).toEqual([
+        "Agents hold their own keys",
+        "Agents pay for their own compute",
+      ])
+      for (const item of points.children) {
+        expect(item.nodeType).toBe("element")
+        expect(item.elementType).toBe("frontmatter-field")
+        expect(item.contentType).toBe("translatable")
+      }
+    })
+
+    it("builds the same shape for flow sequences", () => {
+      const tags = field("tags")
+      expect(tags.nodeType).toBe("section")
+      expect(tags.children.map((c) => c.id)).toEqual(["0", "1"])
+      expect(tags.children.map((c) => c.value)).toEqual(["solidity", "vyper"])
+    })
+
+    it("marks sequence items inert when the field key is inert", () => {
+      for (const item of field("tags").children) {
+        expect(item.contentType).toBe("inert")
+      }
+    })
+
+    it("never turns a sequence item containing a colon into a key", () => {
+      const topic = field("topic")
+      expect(topic.children.map((c) => c.value)).toEqual([
+        "AI Agents: Luna",
+        "decentralization",
+      ])
+      const ids = tree.children.map((c) => c.id)
+      expect(ids.some((id) => id.includes("- "))).toBe(false)
+      expect(ids).not.toContain('frontmatter:- "AI Agents')
+    })
+
+    it("builds a section node per mapping, keyed by subkey", () => {
+      const author = field("author")
+      expect(author.nodeType).toBe("section")
+      expect(author.children.map((c) => c.id)).toEqual(["name", "title", "url"])
+      expect(author.children.map((c) => c.value)).toEqual([
+        "Ada Lovelace",
+        "Protocol researcher",
+        "https://example.com/ada",
+      ])
+    })
+
+    it("classifies mapping values by their own subkey", () => {
+      const byId = new Map(field("author").children.map((c) => [c.id, c]))
+      expect(byId.get("title")!.contentType).toBe("translatable")
+      expect(byId.get("name")!.contentType).toBe("inert")
+      expect(byId.get("url")!.contentType).toBe("inert")
+    })
+
+    it("folds and keeps multi-line scalars as a single element", () => {
+      expect(field("abstract").nodeType).toBe("element")
+      expect(field("abstract").value).toBe(
+        "A folded summary that the author wrapped across two source lines."
+      )
+      expect(field("transcript").nodeType).toBe("element")
+      expect(field("transcript").value).toBe(
+        "First literal line.\nSecond literal line.\n"
+      )
+    })
+
+    it("parses the body after a multi-line frontmatter block", () => {
+      const sections = tree.children.filter((c) => c.nodeType === "section")
+      expect(sections.map((s) => s.id)).toEqual([
+        "frontmatter:summaryPoints",
+        "frontmatter:tags",
+        "frontmatter:topic",
+        "frontmatter:author",
+        "what-agents-are",
+        "how-agents-pay",
+      ])
+    })
+
+    it("computes hashes for every frontmatter node", () => {
+      for (const node of walk(tree)) {
+        expect(node.contentHash).toBeTruthy()
+        expect(node.anchorHash).toBeTruthy()
+      }
+    })
+
+    it("reports no parse error for valid YAML", () => {
+      expect(tree.meta?.frontmatterParseError).toBeUndefined()
+    })
+  })
+
+  describe("CRLF frontmatter", () => {
+    // Only the frontmatter block is compared here: heading detection itself
+    // does not handle CRLF, which predates YAML frontmatter parsing.
+    it("hashes the same as the LF spelling", () => {
+      const lf = "---\ntitle: My Page\ntags:\n  - a\n  - b\n---\n\n## S {#s}\n\nBody.\n"
+      const fields = (md: string) =>
+        parseMarkdown(md, { depth: "element" }).children.filter((c) =>
+          c.id.startsWith("frontmatter:")
+        )
+      const lfFields = fields(lf)
+      const crlfFields = fields(lf.replace(/\n/g, "\r\n"))
+
+      expect(crlfFields.map((c) => c.id)).toEqual(lfFields.map((c) => c.id))
+      const tags = crlfFields.find((c) => c.id === "frontmatter:tags")!
+      expect(tags.children.map((c) => c.value)).toEqual(["a", "b"])
+      expect(crlfFields.map((c) => [c.contentHash, c.anchorHash])).toEqual(
+        lfFields.map((c) => [c.contentHash, c.anchorHash])
+      )
+    })
+  })
+
+  describe("invalid frontmatter", () => {
+    const md = [
+      "---",
+      "title: My Page",
+      "  bad: [unclosed",
+      "lang: en",
+      "---",
+      "",
+      "## Section {#s}",
+      "",
+      "Body.",
+    ].join("\n")
+
+    it("falls back to line-based parsing instead of throwing", () => {
+      const tree = parseMarkdown(md, { depth: "element" })
+      const ids = tree.children.map((c) => c.id)
+      expect(ids).toContain("frontmatter:title")
+      expect(ids).toContain("frontmatter:lang")
+      expect(ids).toContain("s")
+      const title = tree.children.find((c) => c.id === "frontmatter:title")!
+      expect(title.value).toBe("My Page")
+      expect(title.nodeType).toBe("element")
+    })
+
+    it("flags the failure on root meta", () => {
+      const tree = parseMarkdown(md, { depth: "element" })
+      expect(tree.meta?.frontmatterParseError).toBe("true")
+    })
+
+    it("does not flag valid frontmatter", () => {
+      const tree = parseMarkdown(
+        "---\ntitle: My Page\n---\n\n## S {#s}\n\nBody.",
+        { depth: "element" }
+      )
+      expect(tree.meta?.frontmatterParseError).toBeUndefined()
+    })
+  })
+
   describe("hash stability", () => {
     it("whitespace changes do not affect hashes", () => {
       const content1 = `## Test {#test}\n\nHello world\n`

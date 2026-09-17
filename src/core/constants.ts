@@ -5,4 +5,4 @@ export const AUTO_SLUG_PREFIX = "_auto:"
 export const LABEL_NODE_ID = "_label"
 
 /** Current manifest schema version */
-export const MANIFEST_VERSION = 1
+export const MANIFEST_VERSION = 2
